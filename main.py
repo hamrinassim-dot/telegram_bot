@@ -27,6 +27,7 @@ load_dotenv()
 # Configuration Flask pour Render
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
+telegram_app = None
 
 
 @app.route('/')
@@ -994,3 +995,4 @@ if __name__ == "__main__":
         setup_signal_handlers()
         port = int(os.environ.get("PORT", 5000))
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
