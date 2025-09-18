@@ -23,11 +23,11 @@ logger = get_logger(__name__)
 
 # Chargement des variables d'environnement
 load_dotenv()
+telegram_app = None
 
 # Configuration Flask pour Render
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
-telegram_app = None
 
 
 @app.route('/')
@@ -154,7 +154,7 @@ def run_telegram_bot():
         if telegram_app is None:
             # Initialisation avant polling
             asyncio.run(setup_telegram_bot())
-            
+
         telegram_app.run_polling(
             allowed_updates=["message", "chat_member", "my_chat_member"],
             poll_interval=3,
@@ -990,7 +990,6 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 if __name__ == "__main__":
-    import sys
     if len(sys.argv) > 1 and sys.argv[1] == "bot":
         setup_signal_handlers()
         setup_telegram_bot()
@@ -999,5 +998,3 @@ if __name__ == "__main__":
         setup_signal_handlers()
         port = int(os.environ.get("PORT", 5000))
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-
-
