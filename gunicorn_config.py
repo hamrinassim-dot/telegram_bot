@@ -4,7 +4,7 @@ import multiprocessing
 
 # Configuration du serveur
 bind = f"0.0.0.0:{os.getenv('PORT', '10000')}"
-workers = min(4, (multiprocessing.cpu_count() * 2) + 1)
+workers = 1
 worker_class = "sync"
 worker_connections = 1000
 max_requests = 1000
@@ -67,5 +67,6 @@ def post_fork(server, worker):
 
 def worker_abort(worker):
     worker.log.error(f"Worker {worker.pid} arrêté brutalement")
+
 
 
