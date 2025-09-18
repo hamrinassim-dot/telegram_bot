@@ -55,10 +55,17 @@ def worker_int(worker):
 
 def pre_fork(server, worker):
     server.log.info(f"Worker {worker.pid} sur le point de démarrer")
-
 def post_fork(server, worker):
     server.log.info(f"Worker {worker.pid} démarré")
+    try:
+        from main import start_telegram_bot_thread
+        start_telegram_bot_thread()
+        server.log.info("Bot Telegram lancé dans post_fork")
+    except Exception as e:
+        server.log.error(f"Impossible de démarrer le bot : {e}")
+
 
 def worker_abort(worker):
     worker.log.error(f"Worker {worker.pid} arrêté brutalement")
+
 
