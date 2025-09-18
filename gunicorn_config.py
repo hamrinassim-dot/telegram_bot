@@ -1,4 +1,4 @@
-# gunicorn_config.py - Configuration pour la production
+# gunicorn_config.py - Configuration pour main.py
 import os
 import multiprocessing
 
