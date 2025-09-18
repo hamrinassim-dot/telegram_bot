@@ -151,10 +151,6 @@ def setup_telegram_bot():
 def run_telegram_bot():
     """Lance le bot Telegram (bloquant jusqu’à arrêt)"""
     try:
-        if telegram_app is None:
-            # Initialisation avant polling
-            asyncio.run(setup_telegram_bot())
-
         telegram_app.run_polling(
             allowed_updates=["message", "chat_member", "my_chat_member"],
             poll_interval=3,
