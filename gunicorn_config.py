@@ -29,6 +29,20 @@ limit_request_line = 4096
 limit_request_fields = 100
 limit_request_field_size = 8190
 
+# === Flag global pour éviter plusieurs bots ===
+_bot_started = False
+
+def post_fork(server, worker):
+    """Démarre le bot Telegram dans un seul worker"""
+    global _bot_started
+    server.log.info(f"Worker {worker.pid} démarré")
+
+    if not _bot_started:
+        server.log.info("🚀 Lancement du bot Telegram dans ce worker")
+        bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+        bot_thread.start()
+        _bot_started = True
+        
 # Worker lifecycle
 def on_starting(server):
     server.log.info("Démarrage de Gunicorn")
@@ -47,3 +61,4 @@ def post_fork(server, worker):
 
 def worker_abort(worker):
     worker.log.error(f"Worker {worker.pid} arrêté brutalement")
+
