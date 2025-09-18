@@ -149,8 +149,17 @@ def setup_telegram_bot():
 
 
 def run_telegram_bot():
-    """Lance le bot Telegram (bloquant jusqu’à arrêt)"""
+    """Démarre le bot Telegram (bloquant)."""
+    global telegram_app
+    if not telegram_app:
+        logger.error("Impossible de démarrer le bot : telegram_app est None")
+        return
+    
     try:
+        # Création d'une boucle asyncio pour ce thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         telegram_app.run_polling(
             allowed_updates=["message", "chat_member", "my_chat_member"],
             poll_interval=3,
@@ -1006,5 +1015,6 @@ else:
     # Configure et démarre aussi en prod
     setup_telegram_bot()
     bot_thread = start_telegram_bot_thread()
+
 
 
