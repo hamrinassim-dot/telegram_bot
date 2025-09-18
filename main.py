@@ -6,23 +6,182 @@ from telegram.constants import ChatMemberStatus, ParseMode
 from telegram.error import BadRequest, Forbidden
 
 from collections import defaultdict
-from keepalive import keep_alive
-
+from flask import Flask, jsonify
 import asyncio
 from logging_config import configure_logging, get_logger
 from datetime import datetime, timedelta
 import yaml
 import pytz
 import re
+import signal
+import sys
+import threading
 
-# Initialisation du système de logs
-logger = configure_logging()
-
-keep_alive()
+# Configuration du logging dès le début
+configure_logging()
+logger = get_logger(__name__)
 
 # Chargement des variables d'environnement
 load_dotenv()
-token = os.getenv('TOKEN')
+
+# Configuration Flask pour Render
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
+
+
+@app.route('/')
+def home():
+    try:
+        logger.info("Requête reçue sur /")
+        return jsonify({
+            "status": "R2D2 connecté",
+            "timestamp": datetime.now().isoformat(),
+            "bot_running": telegram_app is not None
+        }), 200
+    except Exception as e:
+        logger.error(f"Erreur dans home(): {e}")
+        return jsonify({"error": "Erreur serveur"}), 500
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint pour Render et UptimeRobot"""
+    try:
+        bot_status = "running" if telegram_app else "stopped"
+        logger.debug("Health check requis")
+        return jsonify({
+            "status": "OK",
+            "message": "Service running",
+            "bot_status": bot_status,
+            "timestamp": datetime.now().isoformat(),
+            "version": "2.0"
+        }), 200
+    except Exception as e:
+        logger.error(f"Erreur dans health_check(): {e}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+@app.route('/ping')
+def ping():
+    """Endpoint simple pour keepalive"""
+    return "pong", 200
+
+@app.route('/bot/status')
+def bot_status():
+    """Status du bot Telegram"""
+    try:
+        if telegram_app:
+            return jsonify({
+                "bot_status": "running",
+                "bot_id": telegram_app.bot.id if telegram_app.bot else None
+            }), 200
+        else:
+            return jsonify({"bot_status": "stopped"}), 200
+    except Exception as e:
+        logger.error(f"Erreur bot_status(): {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.warning(f"404 - Page non trouvée: {error}")
+    return jsonify({"error": "Page non trouvée"}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 - Erreur interne: {error}")
+    return jsonify({"error": "Erreur interne du serveur"}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Gère toutes les exceptions non catchées"""
+    logger.error(f"Exception non gérée: {e}", exc_info=True)
+    return jsonify({"error": "Une erreur inattendue s'est produite"}), 500
+
+def setup_signal_handlers():
+    """Configure les gestionnaires de signaux pour un arrêt propre"""
+    def signal_handler(sig, frame):
+        logger.info(f"Signal {sig} reçu, arrêt en cours...")
+        if telegram_app:
+            logger.info("Arrêt du bot Telegram...")
+            try:
+                # Arrêt propre du bot
+                asyncio.create_task(telegram_app.stop())
+            except Exception as e:
+                logger.error(f"Erreur lors de l'arrêt du bot: {e}")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+async def setup_telegram_bot():
+    """Configuration et démarrage du bot Telegram"""
+    global telegram_app
+    load_dotenv()
+
+    try:
+        # Récupération du token
+        token = os.getenv('TOKEN')
+        if not token:
+            logger.error("Token Telegram manquant!")
+            return
+        
+        # Création de l'application Telegram
+        telegram_app = Application.builder().token(token).build()
+        
+        # Enregistrement des commandes:
+        for cmd in COMMAND_MAPPINGS.keys():
+            telegram_app.add_handler(CommandHandler(cmd, generic_info_command))
+
+        for savant_id in SAVANTS_INFO.keys():
+            telegram_app.add_handler(CommandHandler(savant_id, savant_command_handler))
+
+        telegram_app.add_handler(CommandHandler('reload', reload_messages))
+        telegram_app.add_handler(CommandHandler('start', start))
+        telegram_app.add_handler(CommandHandler('envoyer_pub_entreprise', envoyer_pub_entreprise))
+        telegram_app.add_handler(CommandHandler('getid', get_chat_id))
+        telegram_app.add_handler(CommandHandler('help', help_command))
+        telegram_app.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER))
+        telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_album))
+        telegram_app.add_handler(CommandHandler('ban', ban_command))
+
+        # Gestionnaire pour les commandes inconnues - doit être ajouté en DERNIER
+        telegram_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+        logger.info("Tous les handerlers enregistrés avec succes")
+        
+        # Démarrage du bot
+        logger.info("Démarrage du bot Telegram...")
+        await telegram_app.run_polling(
+            allowed_updates=["message", "chat_member", "my_chat_member"], 
+            poll_interval=3,
+            drop_pending_updates=True,
+            stop_signals=None)
+               
+        logger.info("Bot Telegram démarré avec succès")
+        
+    except Exception as e:
+        logger.error(f"Erreur lors du démarrage du bot Telegram: {e}", exc_info=True)
+        raise
+
+def run_telegram_bot():
+    """Lance le bot Telegram dans une boucle asyncio"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(setup_telegram_bot())
+    except Exception as e:
+        logger.error(f"Erreur dans run_telegram_bot: {e}", exc_info=True)
+
+def start_telegram_bot_thread():
+    """Démarre le bot Telegram dans un thread séparé"""
+    try:
+        bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+        bot_thread.start()
+        logger.info("Thread du bot Telegram démarré")
+        return bot_thread
+    except Exception as e:
+        logger.error(f"Erreur lors du démarrage du thread bot: {e}")
+        return None
+    
+# Chargement des variables d'environnement
+load_dotenv()
 chat_id = int(os.getenv('CHAT_ID'))
 
 media_groups = defaultdict(list)
@@ -831,45 +990,20 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await asyncio.sleep(10)
     await supprimer_message(update.message)
 
-def main():
-    """Point d'entrée principal du programme"""
-    logger.info("🔄 Démarrage du bot...")
-    
-    # Vérification des variables d'environnement
-    if not token:
-        logger.error("❌ Token Telegram non trouvé. Vérifiez votre fichier .env")
-        return
-    
-    if not chat_id:
-        logger.error("❌ Chat ID non trouvé. Vérifiez votre fichier .env")
-        return
-    
-    # Création de l'application
-    app = Application.builder().token(token).post_init(post_init).build()
-    
-    # Enregistrement des commandes:
-    for cmd in COMMAND_MAPPINGS.keys():
-        app.add_handler(CommandHandler(cmd, generic_info_command))
 
-    for savant_id in SAVANTS_INFO.keys():
-        app.add_handler(CommandHandler(savant_id, savant_command_handler))
-
-    app.add_handler(CommandHandler('reload', reload_messages))
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('envoyer_pub_entreprise', envoyer_pub_entreprise))
-    app.add_handler(CommandHandler('getid', get_chat_id))
-    app.add_handler(CommandHandler('help', help_command))
-    app.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_album))
-    app.add_handler(CommandHandler('ban', ban_command))
-
-    # Gestionnaire pour les commandes inconnues - doit être ajouté en DERNIER
-    app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-    
-    app.run_polling(allowed_updates=["message", "chat_member", "my_chat_member"], poll_interval=3)
-
-    # Démarrage du bot
-    logger.info("🤖 Bot démarré...")
-    
 if __name__ == '__main__':
-    main()
+    setup_signal_handlers()
+    logger.info("=== Démarrage de l'application R2D2 ===")
+    
+    # Démarrage du bot Telegram
+    bot_thread = start_telegram_bot_thread()
+    
+    # Pour le développement local uniquement
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Démarrage du serveur Flask sur le port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+else:
+    # En production (avec Gunicorn), démarrer seulement le bot
+    setup_signal_handlers()
+    logger.info("=== Démarrage en mode production ===")
+    bot_thread = start_telegram_bot_thread()
