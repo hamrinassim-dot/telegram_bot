@@ -111,63 +111,55 @@ def setup_signal_handlers():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-async def setup_telegram_bot():
-    """Configuration et démarrage du bot Telegram"""
+def setup_telegram_bot():
+    """Configuration du bot Telegram (handlers, token, etc.)"""
     global telegram_app
     load_dotenv()
 
-    try:
-        # Récupération du token
-        token = os.getenv('TOKEN')
-        if not token:
-            logger.error("Token Telegram manquant!")
-            return
-        
-        # Création de l'application Telegram
-        telegram_app = Application.builder().token(token).build()
-        
-        # Enregistrement des commandes:
-        for cmd in COMMAND_MAPPINGS.keys():
-            telegram_app.add_handler(CommandHandler(cmd, generic_info_command))
+    token = os.getenv('TOKEN')
+    if not token:
+        logger.error("Token Telegram manquant!")
+        return None
+    
+    # Création de l'application Telegram
+    telegram_app = Application.builder().token(token).build()
+    
+    # Enregistrement des commandes
+    for cmd in COMMAND_MAPPINGS.keys():
+        telegram_app.add_handler(CommandHandler(cmd, generic_info_command))
 
-        for savant_id in SAVANTS_INFO.keys():
-            telegram_app.add_handler(CommandHandler(savant_id, savant_command_handler))
+    for savant_id in SAVANTS_INFO.keys():
+        telegram_app.add_handler(CommandHandler(savant_id, savant_command_handler))
 
-        telegram_app.add_handler(CommandHandler('reload', reload_messages))
-        telegram_app.add_handler(CommandHandler('start', start))
-        telegram_app.add_handler(CommandHandler('envoyer_pub_entreprise', envoyer_pub_entreprise))
-        telegram_app.add_handler(CommandHandler('getid', get_chat_id))
-        telegram_app.add_handler(CommandHandler('help', help_command))
-        telegram_app.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER))
-        telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_album))
-        telegram_app.add_handler(CommandHandler('ban', ban_command))
+    telegram_app.add_handler(CommandHandler('reload', reload_messages))
+    telegram_app.add_handler(CommandHandler('start', start))
+    telegram_app.add_handler(CommandHandler('envoyer_pub_entreprise', envoyer_pub_entreprise))
+    telegram_app.add_handler(CommandHandler('getid', get_chat_id))
+    telegram_app.add_handler(CommandHandler('help', help_command))
+    telegram_app.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_album))
+    telegram_app.add_handler(CommandHandler('ban', ban_command))
 
-        # Gestionnaire pour les commandes inconnues - doit être ajouté en DERNIER
-        telegram_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-        logger.info("Tous les handerlers enregistrés avec succes")
-        
-        # Démarrage du bot
-        logger.info("Démarrage du bot Telegram...")
-        await telegram_app.run_polling(
-            allowed_updates=["message", "chat_member", "my_chat_member"], 
-            poll_interval=3,
-            drop_pending_updates=True,
-            stop_signals=None)
-               
-        logger.info("Bot Telegram démarré avec succès")
-        
-    except Exception as e:
-        logger.error(f"Erreur lors du démarrage du bot Telegram: {e}", exc_info=True)
-        raise
+    # Gestionnaire pour les commandes inconnues - doit être ajouté en DERNIER
+    telegram_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    
+    logger.info("Tous les handlers enregistrés avec succès")
+    return telegram_app
+
 
 def run_telegram_bot():
-    """Lance le bot Telegram dans une boucle asyncio"""
+    """Lance le bot Telegram (bloquant jusqu’à arrêt)"""
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(setup_telegram_bot())
+        telegram_app.run_polling(
+            allowed_updates=["message", "chat_member", "my_chat_member"],
+            poll_interval=3,
+            drop_pending_updates=True,
+            stop_signals=None
+        )
+        logger.info("Bot Telegram démarré avec succès")
     except Exception as e:
         logger.error(f"Erreur dans run_telegram_bot: {e}", exc_info=True)
+
 
 def start_telegram_bot_thread():
     """Démarre le bot Telegram dans un thread séparé"""
@@ -179,6 +171,7 @@ def start_telegram_bot_thread():
     except Exception as e:
         logger.error(f"Erreur lors du démarrage du thread bot: {e}")
         return None
+
     
 # Chargement des variables d'environnement
 load_dotenv()
@@ -991,19 +984,13 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await supprimer_message(update.message)
 
 
-if __name__ == '__main__':
-    setup_signal_handlers()
-    logger.info("=== Démarrage de l'application R2D2 ===")
-    
-    # Démarrage du bot Telegram
-    bot_thread = start_telegram_bot_thread()
-    
-    # Pour le développement local uniquement
-    port = int(os.environ.get('PORT', 5000))
-    logger.info(f"Démarrage du serveur Flask sur le port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
-else:
-    # En production (avec Gunicorn), démarrer seulement le bot
-    setup_signal_handlers()
-    logger.info("=== Démarrage en mode production ===")
-    bot_thread = start_telegram_bot_thread()
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "bot":
+        setup_signal_handlers()
+        setup_telegram_bot()
+        run_telegram_bot()
+    else:
+        setup_signal_handlers()
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
