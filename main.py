@@ -985,12 +985,26 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await supprimer_message(update.message)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "bot":
-        setup_signal_handlers()
-        setup_telegram_bot()
-        run_telegram_bot()
-    else:
-        setup_signal_handlers()
-        port = int(os.environ.get("PORT", 5000))
-        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+if __name__ == '__main__':
+    setup_signal_handlers()
+    logger.info("=== Démarrage de l'application R2D2 ===")
+
+    # Configure d'abord le bot
+    setup_telegram_bot()
+    
+    # Puis démarre le bot
+    bot_thread = start_telegram_bot_thread()
+
+    # Flask
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Démarrage du serveur Flask sur le port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+else:
+    setup_signal_handlers()
+    logger.info("=== Démarrage en mode production ===")
+
+    # Configure et démarre aussi en prod
+    setup_telegram_bot()
+    bot_thread = start_telegram_bot_thread()
+
+
